@@ -8,6 +8,7 @@ Created on Thu Dec 28 15:39:40 2017
 import numpy as np
 import os
 import tensorflow as tf
+import keras
 from keras import optimizers
 from keras.layers import Input
 from keras.models import Model
@@ -58,7 +59,7 @@ def jitter_point_cloud(batch_data, sigma=0.01, clip=0.05):
           BxNx3 array, jittered batch of point clouds
     """
     B, N, C = batch_data.shape
-    assert(clip > 0)
+    assert (clip > 0)
     jittered_data = np.clip(sigma * np.random.randn(B, N, C), -1 * clip, clip)
     jittered_data += batch_data
     return jittered_data
@@ -181,7 +182,6 @@ for d in filenames:
 test_points_r = test_points.reshape(-1, num_points, 3)
 test_labels_r = test_labels.reshape(-1, 1)
 
-
 # label to categorical
 Y_train = np_utils.to_categorical(train_labels_r, k)
 Y_test = np_utils.to_categorical(test_labels_r, k)
@@ -191,21 +191,24 @@ model.compile(optimizer='adam',
               loss='categorical_crossentropy',
               metrics=['accuracy'])
 
+
+class RotateJitterPC(keras.callbacks.Callback):
+    def on_epoch_begin(self, epoch, logs={}):
+        self.model.x = jitter_point_cloud(rotate_point_cloud(train_points_r))
+
+
+early_stop = keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
+rotate_jitter_pc = RotateJitterPC()
+
 # Fit model on training data
-for i in range(1,50):
-    #model.fit(train_points_r, Y_train, batch_size=32, epochs=1, shuffle=True, verbose=1)
-    # rotate and jitter the points
-    train_points_rotate = rotate_point_cloud(train_points_r)
-    train_points_jitter = jitter_point_cloud(train_points_rotate)
-    model.fit(train_points_jitter, Y_train, batch_size=32, epochs=1, shuffle=True, verbose=1)
-    s = "Current epoch is:" + str(i)
-    print(s)
-    if i % 5 == 0:
-        score = model.evaluate(test_points_r, Y_test, verbose=1)
-        print('Test loss: ', score[0])
-        print('Test accuracy: ', score[1])
+history = model.fit(
+    train_points_r, Y_train,
+    batch_size=32, epochs=50,
+    validation_split=0.2,
+    callbacks=[rotate_jitter_pc, early_stop]
+)
 
 # score the model
-score = model.evaluate(test_points_r, Y_test, verbose=1)
+score = model.evaluate(test_points_r, Y_test)
 print('Test loss: ', score[0])
 print('Test accuracy: ', score[1])
